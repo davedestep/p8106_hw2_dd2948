@@ -1,0 +1,203 @@
+---
+title: "p8106_hw2_dd2948"
+author: "David DeStephano"
+date: "March 15, 2020"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r  message=FALSE, warning = FALSE}
+library(caret)
+library(splines)
+library(lasso2) 
+library(mgcv)
+library(tidyverse)
+library(ggplot2)
+library(earth)
+library(pdp)
+```
+
+#Import the data
+```{r message=FALSE, warning = FALSE}
+college<-read_csv("College.csv")
+```
+
+#Set seed to 2
+```{r}
+set.seed(2)
+```
+
+
+#Scatter plots of response vs. predictors.
+```{r}
+college %>%
+  gather(-Outstate, -College, key = "var", value = "value") %>%
+  ggplot(aes(x = value, y = Outstate)) +
+    geom_point() +
+    facet_wrap(~ var, scales = "free_x") +
+    theme_bw()
+```
+
+#Alternative plot
+```{r}
+map(college, ~sum(is.na(.)))
+
+college2<-college %>% select(-College) %>% select(-Outstate,Outstate) %>% filter(!is.na(Outstate))
+
+
+# matrix of predictors
+x <-model.matrix(Outstate~.,college2)[,-1]
+# vector of response
+y <- college2$Outstate
+
+
+theme1 <-trellis.par.get()
+theme1$plot.symbol$col <-rgb(.2, .4, .2, .5)
+theme1$plot.symbol$pch <- 16
+theme1$plot.line$col <-rgb(.8, .1, .1, 1)
+theme1$plot.line$lwd <- 2
+theme1$strip.background$col <-rgb(.0, .2, .6, .2)
+trellis.par.set(theme1)
+
+featurePlot(x, y, plot = "scatter", labels =c("","Y"),type =c("p"), layout =c(4, 2))
+```
+
+
+#b) Fit a smoothing spline model using Terminal as the only predictor of Outstate for a range of degrees of freedom, as well as the degree of freedom obtained by generalized cross-validation, and plot the resulting fits. Describe the results obtained.
+
+```{r}
+fit.ss <-smooth.spline(college2$Terminal, college2$Outstate)
+fit.ss$df
+
+Terminallims <-range(college2$Terminal)
+Terminal.grid <-seq(from = Terminallims[1],to = Terminallims[2])
+
+pred.ss <-predict(fit.ss,
+                  x = Terminal.grid)
+
+pred.ss.df <-data.frame(pred = pred.ss$y,
+                        Terminal = Terminal.grid)
+
+p <-ggplot(data = college2,aes(x = Terminal, y =Outstate)) +
+  geom_point(color =rgb(.2, .4, .2, .5))
+
+p+geom_line(aes(x = Terminal, y = pred), data = pred.ss.df,color =rgb(.8, .1, .1, 1))+ theme_bw()
+```
+
+
+#(c) Fit a generalized additive model (GAM) using all the predictors. Plot the results and explain your findings.
+```{r}
+gam.m1 <-gam(Outstate~Apps+Accept+Enroll+Top10perc+Top25perc+F.Undergrad+P.Undergrad+Room.Board+Books+ Personal+PhD+Terminal+S.F.Ratio+perc.alumni+Expend+Grad.Rate, data = college2)
+
+
+gam.m2 <-gam(Outstate~Apps+Accept+Enroll+Top10perc+Top25perc+F.Undergrad+P.Undergrad+Room.Board+Books+ Personal+PhD+s(Terminal)+S.F.Ratio+perc.alumni+Expend+Grad.Rate, data = college2)
+
+
+gam.m3 <-gam(Outstate~Apps+Accept+Enroll+Top10perc+Top25perc+F.Undergrad+P.Undergrad+te(Room.Board, Personal)+Books+ PhD+s(Terminal)+S.F.Ratio+perc.alumni+Expend+Grad.Rate, data = college2)
+
+
+gam.m3 <-gam(Outstate~Apps+Accept+Enroll+Top10perc+Top25perc+F.Undergrad+P.Undergrad+te(Room.Board, Personal)+Books+ PhD+s(Terminal)+S.F.Ratio+perc.alumni+Expend+Grad.Rate, data = college2)
+
+
+gam.m4 <-gam(Outstate~Apps+te(Accept, Enroll)+Top10perc+Top25perc+F.Undergrad+P.Undergrad+te(Room.Board, Personal)+Books+ PhD+s(Terminal)+S.F.Ratio+perc.alumni+Expend+Grad.Rate, data = college2)
+
+
+anova(gam.m1, gam.m2, gam.m3, gam.m4, test = "F")
+
+
+plot(gam.m2)
+
+vis.gam(gam.m3, view =c("Room.Board","Personal"),plot.type = "contour", color = "topo")
+
+plot(gam.m4)
+vis.gam(gam.m4, view =c("Accept","Enroll"),plot.type = "contour", color = "topo")
+
+
+```
+
+According to the anova procedure, model 4 is the best fitting model
+
+
+
+#(d) Fit a multivariate adaptive regression spline (MARS) model using all the predictors. Report the final model. Present the partial dependence plot of an arbitrary predictor in your final model.
+
+```{r}
+ctrl1 <-trainControl(method = "cv", number = 10)
+mars_grid <-expand.grid(degree = 1:4,
+                        nprune =2:25)
+
+mars.fit <-train(x, y,
+                 method = "earth",
+                 tuneGrid = mars_grid,
+                 trControl = ctrl1)
+
+ggplot(mars.fit)
+
+mars.fit$bestTune
+
+coef(mars.fit$finalModel)
+```
+
+Partial Dependence plot
+```{r}
+p1 <-partial(mars.fit, pred.var =c("Room.Board"), grid.resolution = 10)%>% autoplot()
+
+p2 <-partial(mars.fit, pred.var =c("Room.Board","Personal"), grid.resolution = 10)%>%plotPartial(levelplot = FALSE, zlab = "yhat", drape = TRUE,screen =list(z = 20, x = -60))
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+
+#Compare to caret GAM
+
+```{r}
+gam.fit <-train(x, y,
+                method = "gam",
+                tuneGrid =data.frame(method = "GCV.Cp", select =c(TRUE,FALSE)),
+                trControl = ctrl1)
+
+
+bwplot(resamples(list(mars = mars.fit,gam = gam.fit)), metric = "RMSE")
+
+gam.m4
+
+```
+
+
+
+```{r}
+resamp <- resamples(list(gam=gam.fit,
+                         ridge=mars.fit))
+
+summary(resamp)
+```
+
+#(e) Based on the above GAM and MARS models, predict the out-of-state tuition of Columbia University.
+
+
+```{r}
+columbia<-college %>% filter(College=="Columbia University")
+pred.gam <-predict(gam.fit, newdata =columbia)
+pred.mars <-predict(mars.fit, newdata =columbia)
+
+#predicted using the MGCV GAM instead of Caret
+pred.mgcvgam=predict(gam.m4,newdata=columbia,se = TRUE)
+
+
+pred.gam
+pred.mars
+pred.mgcvgam
+```
+The predicted value for the GAM model is $17728.51, and the predicted value for the MARs model is $18456.89
+The predicted value using the fourth MGCV GAM model was 19240.62
+
+
+
+
+
+
+
+For b) not sure if plotted both with range of DF and CV DF
