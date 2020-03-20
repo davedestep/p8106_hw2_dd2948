@@ -179,7 +179,7 @@ mars.fit$bestTune
 coef(mars.fit$finalModel)
 ```
 
-Partial Dependence plot
+##Partial Dependence plot
 ```{r}
 p1 <-partial(mars.fit, pred.var =c("Room.Board"), grid.resolution = 10)%>% autoplot()
 
