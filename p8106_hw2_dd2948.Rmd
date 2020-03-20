@@ -2,7 +2,7 @@
 title: "p8106_hw2_dd2948"
 author: "David DeStephano"
 date: "March 15, 2020"
-output: github_document
+output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
@@ -18,6 +18,7 @@ library(tidyverse)
 library(ggplot2)
 library(earth)
 library(pdp)
+library(tinytex)
 ```
 
 #Import the data
@@ -69,8 +70,8 @@ featurePlot(x, y, plot = "scatter", labels =c("","Y"),type =c("p"), layout =c(4,
 #b) Fit a smoothing spline model using Terminal as the only predictor of Outstate for a range of degrees of freedom, as well as the degree of freedom obtained by generalized cross-validation, and plot the resulting fits. Describe the results obtained.
 
 ```{r}
-fit.ss <-smooth.spline(college2$Terminal, college2$Outstate)
-fit.ss$df
+fit.ss <-smooth.spline(college2$Terminal, college2$Outstate, cv=FALSE) #cv=FALSE gives us Generalized cross validation
+fit.ss$df 
 
 Terminallims <-range(college2$Terminal)
 Terminal.grid <-seq(from = Terminallims[1],to = Terminallims[2])
@@ -86,6 +87,37 @@ p <-ggplot(data = college2,aes(x = Terminal, y =Outstate)) +
 
 p+geom_line(aes(x = Terminal, y = pred), data = pred.ss.df,color =rgb(.8, .1, .1, 1))+ theme_bw()
 ```
+
+
+##Fit a spline using a range of degrees of freedom
+```{r}
+#1 degree of freedom
+
+fit.ss <-smooth.spline(college2$Terminal, college2$Outstate, df=2) #cv=FALSE gives us Generalized cross validation
+fit.ss$df 
+pred.ss <-predict(fit.ss,
+                  x = Terminal.grid)
+pred.ss.df <-data.frame(pred = pred.ss$y,
+                        Terminal = Terminal.grid)
+p <-ggplot(data = college2,aes(x = Terminal, y =Outstate)) +
+  geom_point(color =rgb(.2, .4, .2, .5))
+p+geom_line(aes(x = Terminal, y = pred), data = pred.ss.df,color =rgb(.8, .1, .1, 1))+ theme_bw()
+
+
+#10 degrees of freedom
+fit.ss <-smooth.spline(college2$Terminal, college2$Outstate, df=10) 
+fit.ss$df 
+pred.ss <-predict(fit.ss,
+                  x = Terminal.grid)
+pred.ss.df <-data.frame(pred = pred.ss$y,
+                        Terminal = Terminal.grid)
+p <-ggplot(data = college2,aes(x = Terminal, y =Outstate)) +
+  geom_point(color =rgb(.2, .4, .2, .5))
+p+geom_line(aes(x = Terminal, y = pred), data = pred.ss.df,color =rgb(.8, .1, .1, 1))+ theme_bw()
+
+```
+
+The smoothing spline was fit using the smooth.spline function. When using generalized cross validation, the resulting degrees of frredom is 4.47. When picking your own degrees of freedom, larger values make the line much more wiggly, while lower degrees of freedom are more linear. It is important to model terminal with the cross validated degrees of freedom, as there appears to be no real affect of the percent of staff with a terminal degreee until the 70th percentile, so a linear term would not be very accurate.
 
 
 #(c) Fit a generalized additive model (GAM) using all the predictors. Plot the results and explain your findings.
@@ -104,21 +136,27 @@ gam.m3 <-gam(Outstate~Apps+Accept+Enroll+Top10perc+Top25perc+F.Undergrad+P.Under
 
 gam.m4 <-gam(Outstate~Apps+te(Accept, Enroll)+Top10perc+Top25perc+F.Undergrad+P.Undergrad+te(Room.Board, Personal)+Books+ PhD+s(Terminal)+S.F.Ratio+perc.alumni+Expend+Grad.Rate, data = college2)
 
+gam.m5 <-gam(Outstate~Apps+te(Accept, Enroll)+te(Top10perc, Top25perc)+s(F.Undergrad)+s(P.Undergrad)+te(Room.Board, Personal)+s(Books)+ s(PhD)+s(Terminal)+s(S.F.Ratio)+s(perc.alumni)+s(Expend+Grad.Rate), data = college2)
 
-anova(gam.m1, gam.m2, gam.m3, gam.m4, test = "F")
+
+anova(gam.m1, gam.m2, gam.m3, gam.m4, gam.m5, test = "F")
 
 
-plot(gam.m2)
 
 vis.gam(gam.m3, view =c("Room.Board","Personal"),plot.type = "contour", color = "topo")
 
-plot(gam.m4)
 vis.gam(gam.m4, view =c("Accept","Enroll"),plot.type = "contour", color = "topo")
 
+vis.gam(gam.m5, view =c("Top10perc","Top25perc"),plot.type = "contour", color = "topo")
+
+
+plot(gam.m5)
 
 ```
 
-According to the anova procedure, model 4 is the best fitting model
+According to the anova procedure, model 5 is the best fitting model. In this model, terminal is still modeled as a nonlinear term, while accept and enroll, as well as room_board/personal and top10/top25 are modeled as tensors. Also, all other terms were modeled nonlinearly with the s() function. These terms, are shown to be the best fitting model compared to model 1, 2, 3, and 4. As I stated in the previous question, with the number of staff with a terminal degree, there appears to be no real affect until about the 70th percentile. After this point tuition begins to rise rapidly. I am not sure how to interpret the tensors. Increased room and board appears to affect out of state tuition more noticably when estimated personal spending is low. PHD's also appears to be nonlinear, tuition rises quickly at first as PHD proportion rises, stays flat, and then rises again once >90% of faculty have PHD's 
+
+There are possibly better models still. It would be nice to select variables that should be modeled as nonlinear terms or tensors automatically using the MGCV package.
 
 
 
@@ -162,18 +200,18 @@ gam.fit <-train(x, y,
 
 bwplot(resamples(list(mars = mars.fit,gam = gam.fit)), metric = "RMSE")
 
-gam.m4
-
 ```
 
 
 
 ```{r}
 resamp <- resamples(list(gam=gam.fit,
-                         ridge=mars.fit))
+                         mars=mars.fit))
 
 summary(resamp)
 ```
+This step was not asked for, but the mars fit appears to have a slightly lower RMSE, but this is comparing the Caret gam and mars models, not my final model using the GAM package.
+
 
 #(e) Based on the above GAM and MARS models, predict the out-of-state tuition of Columbia University.
 
@@ -183,21 +221,14 @@ columbia<-college %>% filter(College=="Columbia University")
 pred.gam <-predict(gam.fit, newdata =columbia)
 pred.mars <-predict(mars.fit, newdata =columbia)
 
-#predicted using the MGCV GAM instead of Caret
-pred.mgcvgam=predict(gam.m4,newdata=columbia,se = TRUE)
+#predicted using the GAM package instead of Caret
+pred.gam.m5=predict(gam.m5,newdata=columbia,se = TRUE)
 
 
 pred.gam
 pred.mars
-pred.mgcvgam
+pred.gam.m5
 ```
-The predicted value for the GAM model is $17728.51, and the predicted value for the MARs model is $18456.89
-The predicted value using the fourth MGCV GAM model was 19240.62
+The predicted value for the caret GAM model is 17728.51 dollars, and the predicted value for the MARs model is $18456.89 The predicted value using the fifth GAM package model was 17929.48
 
 
-
-
-
-
-
-For b) not sure if plotted both with range of DF and CV DF
